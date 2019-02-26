@@ -156,6 +156,40 @@ public:
 	}
 
 	/**
+	 * Construct the string with a substring
+	 * [pos, min(pos+count, other.size()) of std::basic_string<CharT> other.
+	 *
+	 * @param[in] other std::basic_string<CharT> from which substring will be copied.
+	 * @param[in] pos start position of substring in other.
+	 * @param[in] count length of substring.
+	 *
+	 * @pre must be called in transaction scope.
+	 *
+	 * @throw std::out_of_range is pos > other.size()
+	 * @throw pmem::pool_error if an object is not in persistent memory.
+	 * @throw pmem::transaction_alloc_error when allocating memory for
+	 * underlying storage in transaction failed.
+	 * @throw pmem::transaction_error if constructor wasn't called in
+	 * transaction.
+	 */
+	basic_string(const std::basic_string<CharT> &other, size_type pos,
+		size_type count = npos)
+	{
+		check_pmem_tx();
+
+		if (pos > other.size())
+			throw std::out_of_range("Index out of range.");
+
+		if (count == npos || pos + count > other.size())
+			count = other.size() - pos;
+
+		auto first = static_cast<difference_type>(pos);
+		auto last = first + static_cast<difference_type>(count);
+
+		initialize(other.cbegin() + first, other.cbegin() + last);
+	}
+
+	/**
 	 * Construct the string with the first count elements of C-style
 	 * string s.
 	 *
@@ -243,6 +277,27 @@ public:
 	 * transaction.
 	 */
 	basic_string(const basic_string &other)
+	{
+		check_pmem_tx();
+
+		initialize(other.cbegin(), other.cend());
+	}
+
+	/**
+	 * Copy constructor. Construct the string with the copy of the contents
+	 * of std::basic_string<CharT> other.
+	 *
+	 * @param[in] other reference to the std::basic_string<CharT> to be copied.
+	 *
+	 * @pre must be called in transaction scope.
+	 *
+	 * @throw pmem::pool_error if an object is not in persistent memory.
+	 * @throw pmem::transaction_alloc_error when allocating memory for
+	 * underlying storage in transaction failed.
+	 * @throw pmem::transaction_error if constructor wasn't called in
+	 * transaction.
+	 */
+	basic_string(const std::basic_string<CharT> &other)
 	{
 		check_pmem_tx();
 
@@ -703,6 +758,20 @@ public:
 	}
 
 	/**
+	 * Compares this string to std::basic_string<CharT> other.
+	 *
+	 * @param[in] other std::basic_string<CharT> to compare to.
+	 *
+	 * @return negative value if *this < other in lexicographical order,
+	 * zero if *this == other and positive value if *this > other.
+	 */
+	int
+	compare(const std::basic_string<CharT> &other) const
+	{
+		return compare(0, size(), other.data(), other.size());
+	}
+
+	/**
 	 * Compares [pos, pos + count) substring of this to other.
 	 * If count > size() - pos, substring is equal to [pos, size()).
 	 *
@@ -719,6 +788,25 @@ public:
 	compare(size_type pos, size_type count, const basic_string &other) const
 	{
 		return compare(pos, count, other.cdata(), other.size());
+	}
+
+	/**
+	 * Compares [pos, pos + count) substring of this to std::basic_string<CharT> other.
+	 * If count > size() - pos, substring is equal to [pos, size()).
+	 *
+	 * @param[in] pos beginning of the substring.
+	 * @param[in] count length of the substring.
+	 * @param[in] other std::basic_string<CharT> to compare to.
+	 *
+	 * @return negative value if substring < other in lexicographical order,
+	 * zero if substring == other and positive value if substring > other.
+	 *
+	 * @throw std::out_of_range is pos > size()
+	 */
+	int
+	compare(size_type pos, size_type count, const std::basic_string<CharT> &other) const
+	{
+		return compare(pos, count, other.data(), other.size());
 	}
 
 	/**
@@ -750,6 +838,37 @@ public:
 			count2 = other.size() - pos2;
 
 		return compare(pos1, count1, other.cdata() + pos2, count2);
+	}
+
+	/**
+	 * Compares [pos1, pos1 + count1) substring of this to
+	 * [pos2, pos2 + count2) substring of std::basic_string<CharT> other.
+	 *
+	 * If count1 > size() - pos, substring is equal to [pos1, size()).
+	 *
+	 * @param[in] pos1 beginning of substring of this.
+	 * @param[in] count1 length of substring of this.
+	 * @param[in] other std::basic_string<CharT> to compare to.
+	 * @param[in] pos2 beginning of substring of other.
+	 * @param[in] count2 length of substring of other.
+	 *
+	 * @return negative value if substring of *this < substring of other in
+	 * lexicographical order, zero if substring of *this == substring of
+	 * other and positive value if substring of *this > substring of other.
+	 *
+	 * @throw std::out_of_range is pos1 > size() or pos2 > other.size()
+	 */
+	int
+	compare(size_type pos1, size_type count1, const std::basic_string<CharT> &other,
+		size_type pos2, size_type count2 = npos) const
+	{
+		if (pos2 > other.size())
+			throw std::out_of_range("Index out of range.");
+
+		if (count2 > other.size() - pos2)
+			count2 = other.size() - pos2;
+
+		return compare(pos1, count1, other.data() + pos2, count2);
 	}
 
 	/**
@@ -1289,6 +1408,126 @@ operator>(const basic_string<CharT, Traits> &lhs, const CharT *rhs)
 template <class CharT, class Traits>
 bool
 operator>=(const basic_string<CharT, Traits> &lhs, const CharT *rhs)
+{
+	return lhs.compare(rhs) >= 0;
+}
+
+/**
+ * Non-member equal operator.
+ */
+template <class CharT, class Traits>
+bool
+operator==(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+{
+	return rhs.compare(lhs) == 0;
+}
+
+/**
+ * Non-member not equal operator.
+ */
+template <class CharT, class Traits>
+bool
+operator!=(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+{
+	return rhs.compare(lhs) != 0;
+}
+
+/**
+ * Non-member less than operator.
+ */
+template <class CharT, class Traits>
+bool
+operator<(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+{
+	return rhs.compare(lhs) > 0;
+}
+
+/**
+ * Non-member less or equal operator.
+ */
+template <class CharT, class Traits>
+bool
+operator<=(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+{
+	return rhs.compare(lhs) >= 0;
+}
+
+/**
+ * Non-member greater than operator.
+ */
+template <class CharT, class Traits>
+bool
+operator>(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+{
+	return rhs.compare(lhs) < 0;
+}
+
+/**
+ * Non-member greater or equal operator.
+ */
+template <class CharT, class Traits>
+bool
+operator>=(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+{
+	return rhs.compare(lhs) <= 0;
+}
+
+/**
+ * Non-member equal operator.
+ */
+template <class CharT, class Traits>
+bool
+operator==(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+{
+	return lhs.compare(rhs) == 0;
+}
+
+/**
+ * Non-member not equal operator.
+ */
+template <class CharT, class Traits>
+bool
+operator!=(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+{
+	return lhs.compare(rhs) != 0;
+}
+
+/**
+ * Non-member less than operator.
+ */
+template <class CharT, class Traits>
+bool
+operator<(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+{
+	return lhs.compare(rhs) < 0;
+}
+
+/**
+ * Non-member less or equal operator.
+ */
+template <class CharT, class Traits>
+bool
+operator<=(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+{
+	return lhs.compare(rhs) <= 0;
+}
+
+/**
+ * Non-member greater than operator.
+ */
+template <class CharT, class Traits>
+bool
+operator>(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+{
+	return lhs.compare(rhs) > 0;
+}
+
+/**
+ * Non-member greater or equal operator.
+ */
+template <class CharT, class Traits>
+bool
+operator>=(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
 {
 	return lhs.compare(rhs) >= 0;
 }
