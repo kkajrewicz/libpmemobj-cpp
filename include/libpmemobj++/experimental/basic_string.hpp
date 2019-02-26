@@ -159,7 +159,8 @@ public:
 	 * Construct the string with a substring
 	 * [pos, min(pos+count, other.size()) of std::basic_string<CharT> other.
 	 *
-	 * @param[in] other std::basic_string<CharT> from which substring will be copied.
+	 * @param[in] other std::basic_string<CharT> from which substring will
+	 * be copied.
 	 * @param[in] pos start position of substring in other.
 	 * @param[in] count length of substring.
 	 *
@@ -173,7 +174,7 @@ public:
 	 * transaction.
 	 */
 	basic_string(const std::basic_string<CharT> &other, size_type pos,
-		size_type count = npos)
+		     size_type count = npos)
 	{
 		check_pmem_tx();
 
@@ -287,7 +288,8 @@ public:
 	 * Copy constructor. Construct the string with the copy of the contents
 	 * of std::basic_string<CharT> other.
 	 *
-	 * @param[in] other reference to the std::basic_string<CharT> to be copied.
+	 * @param[in] other reference to the std::basic_string<CharT> to be
+	 * copied.
 	 *
 	 * @pre must be called in transaction scope.
 	 *
@@ -791,8 +793,9 @@ public:
 	}
 
 	/**
-	 * Compares [pos, pos + count) substring of this to std::basic_string<CharT> other.
-	 * If count > size() - pos, substring is equal to [pos, size()).
+	 * Compares [pos, pos + count) substring of this to
+	 * std::basic_string<CharT> other. If count > size() - pos, substring is
+	 * equal to [pos, size()).
 	 *
 	 * @param[in] pos beginning of the substring.
 	 * @param[in] count length of the substring.
@@ -804,7 +807,8 @@ public:
 	 * @throw std::out_of_range is pos > size()
 	 */
 	int
-	compare(size_type pos, size_type count, const std::basic_string<CharT> &other) const
+	compare(size_type pos, size_type count,
+		const std::basic_string<CharT> &other) const
 	{
 		return compare(pos, count, other.data(), other.size());
 	}
@@ -859,8 +863,9 @@ public:
 	 * @throw std::out_of_range is pos1 > size() or pos2 > other.size()
 	 */
 	int
-	compare(size_type pos1, size_type count1, const std::basic_string<CharT> &other,
-		size_type pos2, size_type count2 = npos) const
+	compare(size_type pos1, size_type count1,
+		const std::basic_string<CharT> &other, size_type pos2,
+		size_type count2 = npos) const
 	{
 		if (pos2 > other.size())
 			throw std::out_of_range("Index out of range.");
@@ -1417,7 +1422,8 @@ operator>=(const basic_string<CharT, Traits> &lhs, const CharT *rhs)
  */
 template <class CharT, class Traits>
 bool
-operator==(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+operator==(const std::basic_string<CharT, Traits> &lhs,
+	   const basic_string<CharT, Traits> &rhs)
 {
 	return rhs.compare(lhs) == 0;
 }
@@ -1427,7 +1433,8 @@ operator==(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT
  */
 template <class CharT, class Traits>
 bool
-operator!=(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+operator!=(const std::basic_string<CharT, Traits> &lhs,
+	   const basic_string<CharT, Traits> &rhs)
 {
 	return rhs.compare(lhs) != 0;
 }
@@ -1437,7 +1444,8 @@ operator!=(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT
  */
 template <class CharT, class Traits>
 bool
-operator<(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+operator<(const std::basic_string<CharT, Traits> &lhs,
+	  const basic_string<CharT, Traits> &rhs)
 {
 	return rhs.compare(lhs) > 0;
 }
@@ -1447,7 +1455,8 @@ operator<(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT,
  */
 template <class CharT, class Traits>
 bool
-operator<=(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+operator<=(const std::basic_string<CharT, Traits> &lhs,
+	   const basic_string<CharT, Traits> &rhs)
 {
 	return rhs.compare(lhs) >= 0;
 }
@@ -1457,7 +1466,8 @@ operator<=(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT
  */
 template <class CharT, class Traits>
 bool
-operator>(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+operator>(const std::basic_string<CharT, Traits> &lhs,
+	  const basic_string<CharT, Traits> &rhs)
 {
 	return rhs.compare(lhs) < 0;
 }
@@ -1467,7 +1477,8 @@ operator>(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT,
  */
 template <class CharT, class Traits>
 bool
-operator>=(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT, Traits> &rhs)
+operator>=(const std::basic_string<CharT, Traits> &lhs,
+	   const basic_string<CharT, Traits> &rhs)
 {
 	return rhs.compare(lhs) <= 0;
 }
@@ -1477,7 +1488,8 @@ operator>=(const std::basic_string<CharT, Traits> &lhs, const basic_string<CharT
  */
 template <class CharT, class Traits>
 bool
-operator==(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+operator==(const basic_string<CharT, Traits> &lhs,
+	   const std::basic_string<CharT, Traits> &rhs)
 {
 	return lhs.compare(rhs) == 0;
 }
@@ -1487,7 +1499,8 @@ operator==(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT
  */
 template <class CharT, class Traits>
 bool
-operator!=(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+operator!=(const basic_string<CharT, Traits> &lhs,
+	   const std::basic_string<CharT, Traits> &rhs)
 {
 	return lhs.compare(rhs) != 0;
 }
@@ -1497,7 +1510,8 @@ operator!=(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT
  */
 template <class CharT, class Traits>
 bool
-operator<(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+operator<(const basic_string<CharT, Traits> &lhs,
+	  const std::basic_string<CharT, Traits> &rhs)
 {
 	return lhs.compare(rhs) < 0;
 }
@@ -1507,7 +1521,8 @@ operator<(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT,
  */
 template <class CharT, class Traits>
 bool
-operator<=(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+operator<=(const basic_string<CharT, Traits> &lhs,
+	   const std::basic_string<CharT, Traits> &rhs)
 {
 	return lhs.compare(rhs) <= 0;
 }
@@ -1517,7 +1532,8 @@ operator<=(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT
  */
 template <class CharT, class Traits>
 bool
-operator>(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+operator>(const basic_string<CharT, Traits> &lhs,
+	  const std::basic_string<CharT, Traits> &rhs)
 {
 	return lhs.compare(rhs) > 0;
 }
@@ -1527,7 +1543,8 @@ operator>(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT,
  */
 template <class CharT, class Traits>
 bool
-operator>=(const basic_string<CharT, Traits> &lhs, const std::basic_string<CharT, Traits> &rhs)
+operator>=(const basic_string<CharT, Traits> &lhs,
+	   const std::basic_string<CharT, Traits> &rhs)
 {
 	return lhs.compare(rhs) >= 0;
 }
