@@ -115,7 +115,7 @@ void
 run_wstring(pmem::obj::pool<root> &pop)
 {
 	auto r = pop.root();
-	
+
 	/* test pmem::wstring copy construction from pmem::wstring */
 	try {
 		nvobj::persistent_ptr<W> ws1, ws2, ws3, ws4;
@@ -186,7 +186,7 @@ main(int argc, char *argv[])
 	}
 
 	run(pop);
-	// run_wstring(pop);
+	run_wstring(pop);
 
 	pop.close();
 
