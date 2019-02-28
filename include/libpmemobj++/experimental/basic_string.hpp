@@ -377,6 +377,24 @@ public:
 	}
 
 	/**
+	 * Copy assignment operator. Replace the string with contents of
+	 * std::basic_string<CharT> other.
+	 *
+	 * @param[in] other reference to the std::basic_string<CharT> to be
+	 * copied.
+	 *
+	 * @throw pmem::transaction_alloc_error when allocating memory for
+	 * underlying storage in transaction failed.
+	 * @throw pmem::transaction_error if constructor wasn't called in
+	 * transaction.
+	 */
+	basic_string &
+	operator=(const std::basic_string<CharT> &str)
+	{
+		return assign(str);
+	}
+
+	/**
 	 * Move assignment operator. Replace the string with the contents of
 	 * other using move semantics.
 	 *
@@ -486,6 +504,29 @@ public:
 	}
 
 	/**
+	 * Replace the string with the copy of the contents of
+	 * std::basic_string<CharT> other.
+	 *
+	 * @param[in] other reference to the std::basic_string<CharT> to be
+	 * copied.
+	 *
+	 * @throw pmem::transaction_alloc_error when allocating memory for
+	 * underlying storage in transaction failed.
+	 * @throw pmem::transaction_error if constructor wasn't called in
+	 * transaction.
+	 */
+	basic_string &
+	assign(const std::basic_string<CharT> &other)
+	{
+		auto pop = get_pool();
+
+		transaction::run(
+			pop, [&] { replace(other.cbegin(), other.cend()); });
+
+		return *this;
+	}
+
+	/**
 	 * Replace the contents with a substring
 	 * [pos, std::min(pos+count, other.size()) of other.
 	 *
@@ -501,6 +542,43 @@ public:
 	 */
 	basic_string &
 	assign(const basic_string &other, size_type pos, size_type count = npos)
+	{
+		if (pos > other.size())
+			throw std::out_of_range("Index out of range.");
+
+		if (count == npos || pos + count > other.size())
+			count = other.size() - pos;
+
+		auto pop = get_pool();
+		auto first = static_cast<difference_type>(pos);
+		auto last = first + static_cast<difference_type>(count);
+
+		transaction::run(pop, [&] {
+			replace(other.cbegin() + first, other.cbegin() + last);
+		});
+
+		return *this;
+	}
+
+	/**
+	 * Replace the contents with a substring
+	 * [pos, std::min(pos+count, other.size()) of std::basic_string<CharT>
+	 * other.
+	 *
+	 * @param[in] other std::basic_string<CharT> from which substring will
+	 * be copied.
+	 * @param[in] pos start position of substring in other.
+	 * @param[in] count length of substring.
+	 *
+	 * @throw std::out_of_range is pos > other.size()
+	 * @throw pmem::transaction_alloc_error when allocating memory for
+	 * underlying storage in transaction failed.
+	 * @throw pmem::transaction_error if constructor wasn't called in
+	 * transaction.
+	 */
+	basic_string &
+	assign(const std::basic_string<CharT> &other, size_type pos,
+	       size_type count = npos)
 	{
 		if (pos > other.size())
 			throw std::out_of_range("Index out of range.");
