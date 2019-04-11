@@ -172,6 +172,11 @@ public:
 	size_type length() const noexcept;
 	size_type max_size() const noexcept;
 	size_type capacity() const noexcept;
+	void resize(size_type count, CharT ch);
+	void resize(size_type n);
+//	void reserve(size_type res_arg = 0);
+//	void shrink_to_fit();
+//	void clear() noexcept;
 
 	/* Modifiers */
 	int compare(const basic_string &other) const;
@@ -244,6 +249,8 @@ private:
 	void check_pmem() const;
 	void check_tx_stage_work() const;
 	void check_pmem_tx() const;
+  	void snapshot_sso() const;
+  	void set_size(size_type new_size);
 };
 
 /**
@@ -1514,6 +1521,53 @@ basic_string<CharT, Traits>::empty() const noexcept
 	return size() == 0;
 }
 
+/**
+ * XXX:
+ */
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::resize(size_type count, CharT ch)
+{
+  if (count > max_size())
+	throw std::length_error("Count exceeds max size.");
+
+  auto pop = get_pool();
+
+  transaction::run(pop, [&] {
+	if (is_sso_used()) {
+	  snapshot_sso();
+	  if (count <= sso_capacity) {
+		if (count > size()) {
+		  traits_type::assign(&*data_sso.begin() + size(), count - size(), c);
+		  set_size(count);
+		  data_sso[count] = '\0';
+		} else {
+
+		}
+	  } else {
+
+	  }
+	} else {
+	  if (count <= sso_capacity)
+	  {
+		sso_type tmp;
+		std::copy(cbegin(), cend(), &*tmp.begin());
+		tmp[size()] = '\0';
+
+		auto begin = tmp.cbegin();
+		auto end = begin + static_cast<difference_type>(size());
+		destroy_data();
+		initialize(begin, end);
+	  }
+	  else
+	  {
+		data_large.resize(count + sizeof('\0'), c);
+		data_large[count] = '\0';
+	  }
+	}
+  });
+}
+
 template <typename CharT, typename Traits>
 bool
 basic_string<CharT, Traits>::is_sso_used() const
@@ -1526,19 +1580,35 @@ basic_string<CharT, Traits>::is_sso_used() const
 
 template <typename CharT, typename Traits>
 void
+basic_string<CharT, Traits>::snapshot_sso() const
+{
+/*
+ * XXX: this can be optimized - only snapshot length() elements.
+ */
+#if LIBPMEMOBJ_CPP_VG_MEMCHECK_ENABLED
+  VALGRIND_MAKE_MEM_DEFINED(&data_sso, sizeof(data_sso));
+#endif
+  data_sso.data();
+};
+
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::set_size(size_type new_size)
+{
+  if (new_size <= sso_capacity)
+	_size = new_size;
+  else
+	_size = std::numeric_limits<size_type>::max();
+}
+
+template <typename CharT, typename Traits>
+void
 basic_string<CharT, Traits>::destroy_data()
 {
 	assert(pmemobj_tx_stage() == TX_STAGE_WORK);
 
-	/*
-	 * XXX: this can be optimized - only snapshot length() elements.
-	 */
-#if LIBPMEMOBJ_CPP_VG_MEMCHECK_ENABLED
-	VALGRIND_MAKE_MEM_DEFINED(&data_sso, sizeof(data_sso));
-#endif
-
 	if (is_sso_used()) {
-		data_sso.data();
+		snapshot_sso();
 		/* data_sso constructor does not have to be called */
 	} else {
 		data_large.free_data();
