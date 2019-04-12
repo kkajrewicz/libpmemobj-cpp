@@ -174,11 +174,17 @@ public:
 	size_type capacity() const noexcept;
 	void resize(size_type count, CharT ch);
 	void resize(size_type n);
-//	void reserve(size_type res_arg = 0);
-//	void shrink_to_fit();
-//	void clear() noexcept;
+	void reserve(size_type new_cap = 0);
+	void shrink_to_fit();
+	void clear();
 
 	/* Modifiers */
+	void push_back(CharT ch);
+
+	basic_string &erase(size_type index = 0, size_type count = npos);
+	iterator erase(const_iterator pos);
+	iterator erase(const_iterator first, const_iterator last);
+
 	int compare(const basic_string &other) const;
 	int compare(const std::basic_string<CharT> &other) const;
 	int compare(size_type pos, size_type count,
@@ -249,8 +255,8 @@ private:
 	void check_pmem() const;
 	void check_tx_stage_work() const;
 	void check_pmem_tx() const;
-  	void snapshot_sso() const;
-  	void set_size(size_type new_size);
+	void snapshot_sso() const;
+	void set_size(size_type new_size);
 };
 
 /**
@@ -1528,45 +1534,222 @@ template <typename CharT, typename Traits>
 void
 basic_string<CharT, Traits>::resize(size_type count, CharT ch)
 {
-  if (count > max_size())
-	throw std::length_error("Count exceeds max size.");
+	if (count > max_size())
+		throw std::length_error("Count exceeds max size.");
 
-  auto pop = get_pool();
+	auto pop = get_pool();
 
-  transaction::run(pop, [&] {
 	if (is_sso_used()) {
-	  snapshot_sso();
-	  if (count <= sso_capacity) {
-		if (count > size()) {
-		  traits_type::assign(&*data_sso.begin() + size(), count - size(), c);
-		  set_size(count);
-		  data_sso[count] = '\0';
+		// snapshot_sso();
+		if (count <= sso_capacity) {
+			transaction::run(pop, [&] {
+				snapshot_sso();
+				if (count > size()) {
+					traits_type::assign(&*data_sso.begin() +
+								    size(),
+							    count - size(), ch);
+				}
+				set_size(count);
+				data_sso[count] = '\0';
+			});
 		} else {
+			sso_type tmp;
+			std::copy(cbegin(), cend(), &*tmp.begin());
+			auto sz = size();
+			tmp[sz] = '\0';
 
+			transaction::run(pop, [&] {
+				destroy_data();
+				initialize(count, ch);
+
+				data_large[size()] = '\0';
+
+				std::copy(tmp.cbegin(), tmp.cbegin() + sz,
+					  &*data_large.begin());
+			});
 		}
-	  } else {
-
-	  }
 	} else {
-	  if (count <= sso_capacity)
-	  {
+		if (count <= sso_capacity) {
+			sso_type tmp;
+			std::copy(cbegin(), cbegin() + count, &*tmp.begin());
+			tmp[count] = '\0';
+
+			auto begin = tmp.cbegin();
+			auto end = begin + count;
+
+			transaction::run(pop, [&] {
+				destroy_data();
+				initialize(begin, end);
+			});
+		} else {
+			data_large.resize(count + sizeof('\0'), ch);
+			data_large[count] = '\0';
+		}
+	}
+}
+
+/**
+ * XXX:
+ */
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::resize(size_type count)
+{
+	resize(count, CharT());
+};
+
+/**
+ * XXX:
+ */
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::reserve(size_type new_cap)
+{
+  	if (new_cap > max_size())
+	  throw std::length_error("New capacity exceeds max size");
+
+	if (new_cap < capacity())
+		return;
+
+	if (is_sso_used()) {
+		auto sz = size();
+
 		sso_type tmp;
 		std::copy(cbegin(), cend(), &*tmp.begin());
+		tmp[sz] = '\0';
+
+		auto begin = tmp.cbegin();
+		auto end = begin + sz;
+
+		auto pop = get_pool();
+
+		transaction::run(pop, [&] {
+			destroy_data();
+
+			detail::create<decltype(data_large)>(&data_large);
+			data_large.reserve(new_cap + sizeof('\0'));
+			data_large.assign(begin, end);
+			data_large[sz] = value_type('\0');
+		});
+	} else {
+		data_large.reserve(new_cap + sizeof('\0'));
+	}
+};
+
+/**
+ * XXX:
+ */
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::shrink_to_fit()
+{
+	if (is_sso_used())
+		return;
+
+	if (size() <= sso_capacity) {
+		sso_type tmp;
+		std::copy(cbegin(), cbegin() + size(), &*tmp.begin());
 		tmp[size()] = '\0';
 
 		auto begin = tmp.cbegin();
-		auto end = begin + static_cast<difference_type>(size());
-		destroy_data();
-		initialize(begin, end);
-	  }
-	  else
-	  {
-		data_large.resize(count + sizeof('\0'), c);
-		data_large[count] = '\0';
-	  }
+		auto end = begin + size();
+
+		auto pop = get_pool();
+
+		transaction::run(pop, [&] {
+			destroy_data();
+			initialize(begin, end);
+		});
+	} else {
+		data_large.shrink_to_fit();
 	}
-  });
-}
+};
+
+/**
+ * XXX:
+ */
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::clear()
+{
+	erase(cbegin(), cend());
+};
+
+/**
+ * XXX:
+ */
+template <typename CharT, typename Traits>
+basic_string<CharT, Traits> &
+basic_string<CharT, Traits>::erase(size_type index, size_type count)
+{
+	auto sz = size();
+
+	if (index > sz)
+		throw std::out_of_range("Index exceeds size");
+
+	auto len = std::min(count, sz - index);
+
+	auto pop = get_pool();
+
+	transaction::run(pop, [&] {
+		auto first = begin() + static_cast<difference_type>(index);
+		auto last = first + static_cast<difference_type>(len);
+
+		if (is_sso_used()) {
+			snapshot_sso();
+			traits_type::move(&*first, &*last, len);
+
+			auto new_size = sz - len;
+			set_size(new_size);
+			data_sso[new_size] = value_type('\0');
+		} else {
+			data_large.erase(first, last);
+		}
+	});
+
+	return *this;
+};
+
+/**
+ * XXX:
+ */
+template <typename CharT, typename Traits>
+void push_back(CharT ch){
+	// append(static_cast<size_type>(1), c);
+};
+
+/**
+ * XXX:
+ */
+template <typename CharT, typename Traits>
+typename basic_string<CharT, Traits>::iterator
+basic_string<CharT, Traits>::erase(const_iterator pos)
+{
+	auto begin = cbegin();
+	size_type index = static_cast<size_type>(std::distance(begin, pos));
+
+	erase(index, 1);
+
+	return begin + index;
+};
+
+/**
+ * XXX:
+ */
+template <typename CharT, typename Traits>
+typename basic_string<CharT, Traits>::iterator
+basic_string<CharT, Traits>::erase(const_iterator first, const_iterator last)
+{
+	auto beg = begin();
+
+	size_type index =
+		static_cast<size_type>(std::distance(cbegin(), first));
+	size_type len = static_cast<size_type>(std::distance(first, last));
+
+	erase(index, len);
+
+	return beg + static_cast<difference_type>(index);
+};
 
 template <typename CharT, typename Traits>
 bool
@@ -1586,19 +1769,19 @@ basic_string<CharT, Traits>::snapshot_sso() const
  * XXX: this can be optimized - only snapshot length() elements.
  */
 #if LIBPMEMOBJ_CPP_VG_MEMCHECK_ENABLED
-  VALGRIND_MAKE_MEM_DEFINED(&data_sso, sizeof(data_sso));
+	VALGRIND_MAKE_MEM_DEFINED(&data_sso, sizeof(data_sso));
 #endif
-  data_sso.data();
+	data_sso.data();
 };
 
 template <typename CharT, typename Traits>
 void
 basic_string<CharT, Traits>::set_size(size_type new_size)
 {
-  if (new_size <= sso_capacity)
-	_size = new_size;
-  else
-	_size = std::numeric_limits<size_type>::max();
+	if (new_size <= sso_capacity)
+		_size = new_size;
+	else
+		_size = std::numeric_limits<size_type>::max();
 }
 
 template <typename CharT, typename Traits>
@@ -1700,10 +1883,7 @@ basic_string<CharT, Traits>::initialize(Args &&... args)
 
 	auto new_size = get_size(std::forward<Args>(args)...);
 
-	if (new_size <= sso_capacity)
-		_size = new_size;
-	else
-		_size = std::numeric_limits<size_type>::max();
+	set_size(new_size);
 
 	if (is_sso_used()) {
 		/*
