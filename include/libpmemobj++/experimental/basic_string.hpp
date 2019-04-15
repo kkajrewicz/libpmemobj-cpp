@@ -1892,6 +1892,7 @@ basic_string<CharT, Traits>::initialize(Args &&... args)
 		 */
 		return assign_sso_data(std::forward<Args>(args)...);
 	} else {
+		detail::conditional_add_to_tx(&data_large);
 		detail::create<decltype(data_large)>(&data_large);
 		return assign_large_data(std::forward<Args>(args)...);
 	}
