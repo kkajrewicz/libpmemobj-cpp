@@ -179,20 +179,22 @@ public:
 	void clear();
 
 	/* Modifiers */
-	//void push_back(CharT ch);
+	// void push_back(CharT ch);
 
 	basic_string &erase(size_type index = 0, size_type count = npos);
 	iterator erase(const_iterator pos);
 	iterator erase(const_iterator first, const_iterator last);
 
-//	basic_string &append(size_type count, CharT ch);
+	//	basic_string &append(size_type count, CharT ch);
 	basic_string &append(const basic_string &str);
-  	basic_string &append(const basic_string &str, size_type pos, size_type count);
+	basic_string &append(const basic_string &str, size_type pos,
+			     size_type count);
 	basic_string &append(const CharT *s, size_type count);
 	basic_string &append(const CharT *s);
-//  template <typename InputIt,
-//	typename Enable = typename pmem::detail::is_input_iterator<InputIt>::type>
-//	basic_string &append(InputIt first, InputIt last);
+	// template <typename InputIt,
+	// typename Enable = typename
+	// pmem::detail::is_input_iterator<InputIt>::type>basic_string
+	// &append(InputIt first, InputIt last);
 	basic_string &append(std::initializer_list<CharT> ilist);
 
 	int compare(const basic_string &other) const;
@@ -229,9 +231,9 @@ private:
 		non_sso_type data_large;
 	};
 
-	/* Holds size if sso is used, std::numeric_limits<size_type>::max()
+	/* Holds info whether sso used or not, std::numeric_limits<size_type>::max()
 	 * otherwise */
-	p<size_type> _size;
+	p<char> use_sso;
 
 	/* helper functions */
 	bool is_sso_used() const;
@@ -247,6 +249,7 @@ private:
 	pointer replace(Args &&... args);
 	template <typename... Args>
 	pointer initialize(Args &&... args);
+	void allocate(size_type capacity);
 	template <
 		typename InputIt,
 		typename Enable = typename std::enable_if<
@@ -266,7 +269,6 @@ private:
 	void check_tx_stage_work() const;
 	void check_pmem_tx() const;
 	void snapshot_sso() const;
-	void set_size(size_type new_size);
 };
 
 /**
@@ -283,6 +285,7 @@ basic_string<CharT, Traits>::basic_string()
 {
 	check_pmem_tx();
 
+  	use_sso = 1;
 	initialize(0U, value_type('\0'));
 }
 
@@ -305,6 +308,7 @@ basic_string<CharT, Traits>::basic_string(size_type count, CharT ch)
 {
 	check_pmem_tx();
 
+	allocate(count);
 	initialize(count, ch);
 }
 
@@ -340,6 +344,7 @@ basic_string<CharT, Traits>::basic_string(const basic_string &other,
 	auto first = static_cast<difference_type>(pos);
 	auto last = first + static_cast<difference_type>(count);
 
+	allocate(count);
 	initialize(other.cbegin() + first, other.cbegin() + last);
 }
 
@@ -376,6 +381,7 @@ basic_string<CharT, Traits>::basic_string(const std::basic_string<CharT> &other,
 	auto first = static_cast<difference_type>(pos);
 	auto last = first + static_cast<difference_type>(count);
 
+	allocate(count);
 	initialize(other.cbegin() + first, other.cbegin() + last);
 }
 
@@ -399,6 +405,7 @@ basic_string<CharT, Traits>::basic_string(const CharT *s, size_type count)
 {
 	check_pmem_tx();
 
+	allocate(count);
 	initialize(s, s + count);
 }
 
@@ -422,6 +429,7 @@ basic_string<CharT, Traits>::basic_string(const CharT *s)
 
 	auto length = traits_type::length(s);
 
+	allocate(length);
 	initialize(s, s + length);
 }
 
@@ -445,10 +453,13 @@ template <typename CharT, typename Traits>
 template <typename InputIt, typename Enable>
 basic_string<CharT, Traits>::basic_string(InputIt first, InputIt last)
 {
-	assert(std::distance(first, last) >= 0);
+	auto len = std::distance(first, last);
+
+	assert(len >= 0);
 
 	check_pmem_tx();
 
+	allocate(static_cast<size_type>(len));
 	initialize(first, last);
 }
 
@@ -471,6 +482,7 @@ basic_string<CharT, Traits>::basic_string(const basic_string &other)
 {
 	check_pmem_tx();
 
+	allocate(other.size());
 	initialize(other.cbegin(), other.cend());
 }
 
@@ -514,6 +526,7 @@ basic_string<CharT, Traits>::basic_string(basic_string &&other)
 {
 	check_pmem_tx();
 
+	allocate(other.size());
 	initialize(std::move(other));
 
 	if (other.is_sso_used())
@@ -539,6 +552,7 @@ basic_string<CharT, Traits>::basic_string(std::initializer_list<CharT> ilist)
 {
 	check_pmem_tx();
 
+	allocate(ilist.size());
 	initialize(ilist.begin(), ilist.end());
 }
 
@@ -1225,7 +1239,7 @@ typename basic_string<CharT, Traits>::size_type
 basic_string<CharT, Traits>::size() const noexcept
 {
 	if (is_sso_used())
-		return _size;
+		return traits_type::length(&*data_sso.begin());
 	else if (data_large.size() == 0)
 		return 0;
 	else
@@ -1250,23 +1264,24 @@ template <typename CharT, typename Traits>
 basic_string<CharT, Traits> &
 basic_string<CharT, Traits>::append(const basic_string &str)
 {
-  append(str.data(), str.size());
+	append(str.data(), str.size());
 
-  return *this;
+	return *this;
 }
 
 template <typename CharT, typename Traits>
 basic_string<CharT, Traits> &
-basic_string<CharT, Traits>::append(const basic_string &str, size_type pos, size_type count)
+basic_string<CharT, Traits>::append(const basic_string &str, size_type pos,
+				    size_type count)
 {
-  if (pos > str.size())
-	throw std::out_of_range("Index out of range.");
+	if (pos > str.size())
+		throw std::out_of_range("Index out of range.");
 
-  auto len = std::min(count, str.size() - pos);
+	auto len = std::min(count, str.size() - pos);
 
-  append(str.data() + pos, len);
+	append(str.data() + pos, len);
 
-  return *this;
+	return *this;
 }
 
 template <typename CharT, typename Traits>
@@ -1299,8 +1314,10 @@ basic_string<CharT, Traits>::append(const CharT *s, size_type count)
 				std::copy(tmp.cbegin(), tmp.cbegin() + sz,
 					  &*data_large.begin());
 
-				data_large.insert(data_large.begin() + static_cast<ptrdiff_t>(sz), s,
-						  s + count);
+				data_large.insert(
+					data_large.begin() +
+						static_cast<ptrdiff_t>(sz),
+					s, s + count);
 				data_large.push_back(value_type('\0'));
 			} else {
 				auto dest =
@@ -1318,25 +1335,25 @@ basic_string<CharT, Traits>::append(const CharT *s, size_type count)
 		}
 	});
 
-  return *this;
+	return *this;
 }
 
 template <typename CharT, typename Traits>
 basic_string<CharT, Traits> &
 basic_string<CharT, Traits>::append(const CharT *s)
 {
-  append(s, traits_type::length(s));
+	append(s, traits_type::length(s));
 
-  return *this;
+	return *this;
 }
 
 template <typename CharT, typename Traits>
 basic_string<CharT, Traits> &
 basic_string<CharT, Traits>::append(std::initializer_list<CharT> ilist)
 {
-  append(ilist.begin(), ilist.end());
+	append(ilist.begin(), ilist.end());
 
-  return *this;
+	return *this;
 };
 
 /**
@@ -1864,10 +1881,7 @@ template <typename CharT, typename Traits>
 bool
 basic_string<CharT, Traits>::is_sso_used() const
 {
-	assert(_size <= sso_capacity ||
-	       _size == std::numeric_limits<size_type>::max());
-
-	return _size <= sso_capacity;
+  return use_sso;
 }
 
 template <typename CharT, typename Traits>
@@ -1882,16 +1896,6 @@ basic_string<CharT, Traits>::snapshot_sso() const
 #endif
 	data_sso.data();
 };
-
-template <typename CharT, typename Traits>
-void
-basic_string<CharT, Traits>::set_size(size_type new_size)
-{
-	if (new_size <= sso_capacity)
-		_size = new_size;
-	else
-		_size = std::numeric_limits<size_type>::max();
-}
 
 template <typename CharT, typename Traits>
 void
@@ -1970,6 +1974,7 @@ basic_string<CharT, Traits>::replace(Args &&... args)
 
 	destroy_data();
 
+	allocate(new_size);
 	return initialize(std::forward<Args>(args)...);
 }
 
@@ -1982,6 +1987,7 @@ basic_string<CharT, Traits>::replace(Args &&... args)
  * - basic_string &&
  *
  * @pre must be called in transaction scope.
+ * @pre memory must be allocated before initialization.
  */
 template <typename CharT, typename Traits>
 template <typename... Args>
@@ -1990,22 +1996,31 @@ basic_string<CharT, Traits>::initialize(Args &&... args)
 {
 	assert(pmemobj_tx_stage() == TX_STAGE_WORK);
 
-	auto new_size = get_size(std::forward<Args>(args)...);
-
-	set_size(new_size);
-
 	if (is_sso_used()) {
-		/*
-		 * array is aggregate type so it's not required to call
-		 * a constructor.
-		 */
 		return assign_sso_data(std::forward<Args>(args)...);
 	} else {
-		detail::conditional_add_to_tx(&data_large);
-		detail::create<decltype(data_large)>(&data_large);
 		return assign_large_data(std::forward<Args>(args)...);
 	}
 }
+
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::allocate(size_type capacity)
+{
+	assert(pmemobj_tx_stage() == TX_STAGE_WORK);
+
+  	use_sso = capacity > sso_capacity ? 0 : 1;
+
+  /*
+   * array is aggregate type so it's not required to call
+   * a constructor.
+   */
+	if (!use_sso) {
+		detail::conditional_add_to_tx(&data_large);
+		detail::create<decltype(data_large)>(&data_large);
+		data_large.reserve(capacity + sizeof('\0'));
+	}
+};
 
 /**
  * Initialize sso data. Overload for pair of iterators
@@ -2069,9 +2084,6 @@ basic_string<CharT, Traits>::assign_large_data(InputIt first, InputIt last)
 {
 	assert(pmemobj_tx_stage() == TX_STAGE_WORK);
 
-	auto size = static_cast<size_type>(std::distance(first, last));
-
-	data_large.reserve(size + sizeof('\0'));
 	data_large.assign(first, last);
 	data_large.push_back(value_type('\0'));
 
@@ -2088,7 +2100,6 @@ basic_string<CharT, Traits>::assign_large_data(size_type count, value_type ch)
 {
 	assert(pmemobj_tx_stage() == TX_STAGE_WORK);
 
-	data_large.reserve(count + sizeof('\0'));
 	data_large.assign(count, ch);
 	data_large.push_back(value_type('\0'));
 
