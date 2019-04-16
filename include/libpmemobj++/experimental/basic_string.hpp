@@ -179,11 +179,21 @@ public:
 	void clear();
 
 	/* Modifiers */
-	void push_back(CharT ch);
+	//void push_back(CharT ch);
 
 	basic_string &erase(size_type index = 0, size_type count = npos);
 	iterator erase(const_iterator pos);
 	iterator erase(const_iterator first, const_iterator last);
+
+//	basic_string &append(size_type count, CharT ch);
+	basic_string &append(const basic_string &str);
+  	basic_string &append(const basic_string &str, size_type pos, size_type count);
+	basic_string &append(const CharT *s, size_type count);
+	basic_string &append(const CharT *s);
+//  template <typename InputIt,
+//	typename Enable = typename pmem::detail::is_input_iterator<InputIt>::type>
+//	basic_string &append(InputIt first, InputIt last);
+	basic_string &append(std::initializer_list<CharT> ilist);
 
 	int compare(const basic_string &other) const;
 	int compare(const std::basic_string<CharT> &other) const;
@@ -1235,6 +1245,99 @@ basic_string<CharT, Traits>::data()
 	return is_sso_used() ? data_sso.range(0, size() + sizeof('\0')).begin()
 			     : data_large.data();
 }
+
+template <typename CharT, typename Traits>
+basic_string<CharT, Traits> &
+basic_string<CharT, Traits>::append(const basic_string &str)
+{
+  append(str.data(), str.size());
+
+  return *this;
+}
+
+template <typename CharT, typename Traits>
+basic_string<CharT, Traits> &
+basic_string<CharT, Traits>::append(const basic_string &str, size_type pos, size_type count)
+{
+  if (pos > str.size())
+	throw std::out_of_range("Index out of range.");
+
+  auto len = std::min(count, str.size() - pos);
+
+  append(str.data() + pos, len);
+
+  return *this;
+}
+
+template <typename CharT, typename Traits>
+basic_string<CharT, Traits> &
+basic_string<CharT, Traits>::append(const CharT *s, size_type count)
+{
+	auto sz = size();
+	auto new_size = sz + count;
+
+	if (new_size > max_size())
+		throw std::length_error("Size exceeds max size");
+
+	auto pop = get_pool();
+
+	transaction::run(pop, [&] {
+		if (is_sso_used()) {
+			if (new_size > sso_capacity) {
+				sso_type tmp;
+				std::copy(cbegin(), cend(), &*tmp.begin());
+				auto sz = size();
+				tmp[sz] = '\0';
+
+				destroy_data();
+				// XXX: this should be optimized... should be
+				// done in one step
+				initialize(new_size, value_type('\0'));
+
+				data_large[size()] = '\0';
+
+				std::copy(tmp.cbegin(), tmp.cbegin() + sz,
+					  &*data_large.begin());
+
+				data_large.insert(data_large.begin() + static_cast<ptrdiff_t>(sz), s,
+						  s + count);
+				data_large.push_back(value_type('\0'));
+			} else {
+				auto dest =
+					data_sso.range(sz,
+						       new_size + sizeof('\0'))
+						.begin();
+				traits_type::copy(dest, s, count);
+
+				set_size(new_size);
+				data_sso[new_size] = '\0';
+			}
+		} else {
+			data_large.insert(data_large.end(), s, s + count);
+			data_large.push_back(value_type('\0'));
+		}
+	});
+
+  return *this;
+}
+
+template <typename CharT, typename Traits>
+basic_string<CharT, Traits> &
+basic_string<CharT, Traits>::append(const CharT *s)
+{
+  append(s, traits_type::length(s));
+
+  return *this;
+}
+
+template <typename CharT, typename Traits>
+basic_string<CharT, Traits> &
+basic_string<CharT, Traits>::append(std::initializer_list<CharT> ilist)
+{
+  append(ilist.begin(), ilist.end());
+
+  return *this;
+};
 
 /**
  * Compares [pos, pos + count1) substring of this to
