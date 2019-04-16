@@ -491,7 +491,10 @@ if (ENABLE_STRING)
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/iterator.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/T_size_size.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/string_size_size.pass
-	# XXX: port libcxx test basic_string/string.modifiers/string_append/pointer_size.pass
+
+	build_test(string_libcxx_modifiers_append_pointer_size libcxx/basic_string/string.modifiers/string_append/pointer_size.pass.cpp)
+	add_test_generic(NAME string_libcxx_modifiers_append_pointer_size TRACERS none pmemcheck memcheck)
+		
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/size_char.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/string_view.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/string.pass
