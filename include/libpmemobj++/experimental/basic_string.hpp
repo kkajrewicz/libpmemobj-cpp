@@ -1545,8 +1545,12 @@ basic_string<CharT, Traits>::resize(size_type count, CharT ch)
 			transaction::run(pop, [&] {
 				snapshot_sso();
 				if (count > size()) {
-					traits_type::assign(&*data_sso.begin() +
-								    size(),
+					auto dest =
+						data_sso.range(size(),
+							       count - size() +
+								       sizeof('\0'))
+							.begin();
+					traits_type::assign(dest,
 							    count - size(), ch);
 				}
 				set_size(count);
@@ -1605,8 +1609,8 @@ template <typename CharT, typename Traits>
 void
 basic_string<CharT, Traits>::reserve(size_type new_cap)
 {
-  	if (new_cap > max_size())
-	  throw std::length_error("New capacity exceeds max size");
+	if (new_cap > max_size())
+		throw std::length_error("New capacity exceeds max size");
 
 	if (new_cap < capacity())
 		return;
@@ -1696,8 +1700,10 @@ basic_string<CharT, Traits>::erase(size_type index, size_type count)
 		auto last = first + static_cast<difference_type>(len);
 
 		if (is_sso_used()) {
-			snapshot_sso();
-			traits_type::move(&*first, &*last, len);
+			auto dest = data_sso.range(index, len + sizeof('\0'))
+					    .begin();
+
+			traits_type::move(dest, &*last, len);
 
 			auto new_size = sz - len;
 			set_size(new_size);
