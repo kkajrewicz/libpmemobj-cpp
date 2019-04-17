@@ -179,22 +179,22 @@ public:
 	void clear();
 
 	/* Modifiers */
-	// void push_back(CharT ch);
+	void push_back(CharT ch);
 
 	basic_string &erase(size_type index = 0, size_type count = npos);
 	iterator erase(const_iterator pos);
 	iterator erase(const_iterator first, const_iterator last);
 
-	//	basic_string &append(size_type count, CharT ch);
+	basic_string &append(size_type count, CharT ch);
 	basic_string &append(const basic_string &str);
 	basic_string &append(const basic_string &str, size_type pos,
 			     size_type count);
 	basic_string &append(const CharT *s, size_type count);
 	basic_string &append(const CharT *s);
-	// template <typename InputIt,
-	// typename Enable = typename
-	// pmem::detail::is_input_iterator<InputIt>::type>basic_string
-	// &append(InputIt first, InputIt last);
+	template <typename InputIt,
+		  typename Enable = typename pmem::detail::is_input_iterator<
+			  InputIt>::type>
+	basic_string &append(InputIt first, InputIt last);
 	basic_string &append(std::initializer_list<CharT> ilist);
 
 	int compare(const basic_string &other) const;
@@ -231,8 +231,8 @@ private:
 		non_sso_type data_large;
 	};
 
-	/* Holds info whether sso used or not, std::numeric_limits<size_type>::max()
-	 * otherwise */
+	/* Holds info whether sso used or not,
+	 * std::numeric_limits<size_type>::max() otherwise */
 	p<char> use_sso;
 
 	/* helper functions */
@@ -285,7 +285,7 @@ basic_string<CharT, Traits>::basic_string()
 {
 	check_pmem_tx();
 
-  	use_sso = 1;
+	use_sso = 1;
 	initialize(0U, value_type('\0'));
 }
 
@@ -1262,6 +1262,50 @@ basic_string<CharT, Traits>::data()
 
 template <typename CharT, typename Traits>
 basic_string<CharT, Traits> &
+basic_string<CharT, Traits>::append(size_type count, CharT ch)
+{
+	auto sz = size();
+	auto new_size = sz + count;
+
+	if (new_size > max_size())
+		throw std::length_error("Size exceeds max size");
+
+	auto pop = get_pool();
+
+	transaction::run(pop, [&] {
+		if (is_sso_used()) {
+			if (new_size > sso_capacity) {
+				sso_type tmp;
+				std::copy(cbegin(), cend(), &*tmp.begin());
+				auto sz = size();
+				tmp[sz] = '\0';
+
+				destroy_data();
+				allocate(new_size);
+				initialize(tmp.cbegin(), tmp.cbegin() + sz);
+
+				data_large.resize(new_size, ch);
+				data_large.push_back(value_type('\0'));
+			} else {
+				snapshot_sso();
+				auto dest =
+					data_sso.range(sz, count + sizeof('\0'))
+						.begin();
+				traits_type::assign(dest, count, ch);
+
+				data_sso[new_size] = '\0';
+			}
+		} else {
+			data_large.resize(count, ch);
+			data_large.push_back(value_type('\0'));
+		}
+	});
+
+	return *this;
+}
+
+template <typename CharT, typename Traits>
+basic_string<CharT, Traits> &
 basic_string<CharT, Traits>::append(const basic_string &str)
 {
 	append(str.data(), str.size());
@@ -1305,14 +1349,8 @@ basic_string<CharT, Traits>::append(const CharT *s, size_type count)
 				tmp[sz] = '\0';
 
 				destroy_data();
-				// XXX: this should be optimized... should be
-				// done in one step
-				initialize(new_size, value_type('\0'));
-
-				data_large[size()] = '\0';
-
-				std::copy(tmp.cbegin(), tmp.cbegin() + sz,
-					  &*data_large.begin());
+				allocate(new_size);
+				initialize(tmp.cbegin(), tmp.cbegin() + sz);
 
 				data_large.insert(
 					data_large.begin() +
@@ -1320,13 +1358,13 @@ basic_string<CharT, Traits>::append(const CharT *s, size_type count)
 					s, s + count);
 				data_large.push_back(value_type('\0'));
 			} else {
+				snapshot_sso();
 				auto dest =
 					data_sso.range(sz,
 						       new_size + sizeof('\0'))
 						.begin();
 				traits_type::copy(dest, s, count);
 
-				set_size(new_size);
 				data_sso[new_size] = '\0';
 			}
 		} else {
@@ -1343,6 +1381,18 @@ basic_string<CharT, Traits> &
 basic_string<CharT, Traits>::append(const CharT *s)
 {
 	append(s, traits_type::length(s));
+
+	return *this;
+}
+
+template <typename CharT, typename Traits>
+template <typename InputIt, typename Enable>
+basic_string<CharT, Traits> &
+basic_string<CharT, Traits>::append(InputIt first, InputIt last)
+{
+	const std::basic_string<CharT, Traits> tmp(first, last);
+
+	append(tmp.data(), tmp.size());
 
 	return *this;
 }
@@ -1659,57 +1709,18 @@ basic_string<CharT, Traits>::resize(size_type count, CharT ch)
 
 	auto pop = get_pool();
 
-	if (is_sso_used()) {
-		// snapshot_sso();
-		if (count <= sso_capacity) {
-			transaction::run(pop, [&] {
-				snapshot_sso();
-				if (count > size()) {
-					auto dest =
-						data_sso.range(size(),
-							       count - size() +
-								       sizeof('\0'))
-							.begin();
-					traits_type::assign(dest,
-							    count - size(), ch);
-				}
-				set_size(count);
-				data_sso[count] = '\0';
-			});
+	auto sz = size();
+
+	transaction::run(pop, [&] {
+		if (count > sz) {
+			append(count - sz, ch);
+		} else if (is_sso_used()) {
+			data_sso[count] = '\0';
 		} else {
-			sso_type tmp;
-			std::copy(cbegin(), cend(), &*tmp.begin());
-			auto sz = size();
-			tmp[sz] = '\0';
-
-			transaction::run(pop, [&] {
-				destroy_data();
-				initialize(count, ch);
-
-				data_large[size()] = '\0';
-
-				std::copy(tmp.cbegin(), tmp.cbegin() + sz,
-					  &*data_large.begin());
-			});
+			data_large.resize(count);
+			data_large.push_back(value_type('\0'));
 		}
-	} else {
-		if (count <= sso_capacity) {
-			sso_type tmp;
-			std::copy(cbegin(), cbegin() + count, &*tmp.begin());
-			tmp[count] = '\0';
-
-			auto begin = tmp.cbegin();
-			auto end = begin + count;
-
-			transaction::run(pop, [&] {
-				destroy_data();
-				initialize(begin, end);
-			});
-		} else {
-			data_large.resize(count + sizeof('\0'), ch);
-			data_large[count] = '\0';
-		}
-	}
+	});
 }
 
 /**
@@ -1826,7 +1837,6 @@ basic_string<CharT, Traits>::erase(size_type index, size_type count)
 			traits_type::move(dest, &*last, len);
 
 			auto new_size = sz - len;
-			set_size(new_size);
 			data_sso[new_size] = value_type('\0');
 		} else {
 			data_large.erase(first, last);
@@ -1840,9 +1850,11 @@ basic_string<CharT, Traits>::erase(size_type index, size_type count)
  * XXX:
  */
 template <typename CharT, typename Traits>
-void push_back(CharT ch){
-	// append(static_cast<size_type>(1), c);
-};
+void
+basic_string<CharT, Traits>::push_back(CharT ch)
+{
+	append(static_cast<size_type>(1), ch);
+}
 
 /**
  * XXX:
@@ -1881,7 +1893,7 @@ template <typename CharT, typename Traits>
 bool
 basic_string<CharT, Traits>::is_sso_used() const
 {
-  return use_sso;
+	return use_sso;
 }
 
 template <typename CharT, typename Traits>
@@ -2009,12 +2021,12 @@ basic_string<CharT, Traits>::allocate(size_type capacity)
 {
 	assert(pmemobj_tx_stage() == TX_STAGE_WORK);
 
-  	use_sso = capacity > sso_capacity ? 0 : 1;
+	use_sso = capacity > sso_capacity ? 0 : 1;
 
-  /*
-   * array is aggregate type so it's not required to call
-   * a constructor.
-   */
+	/*
+	 * array is aggregate type so it's not required to call
+	 * a constructor.
+	 */
 	if (!use_sso) {
 		detail::conditional_add_to_tx(&data_large);
 		detail::create<decltype(data_large)>(&data_large);
