@@ -487,7 +487,10 @@ if (ENABLE_STRING)
 	# XXX: port libcxx test basic_string/string.modifiers/string_op_plus_equal/initializer_list.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_op_plus_equal/pointer.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_copy/copy.pass
-	# XXX: port libcxx test basic_string/string.modifiers/string_append/push_back.pass
+
+	build_test(string_libcxx_modifiers_append_push_back libcxx/basic_string/string.modifiers/string_append/push_back.pass.cpp)
+	add_test_generic(NAME string_libcxx_modifiers_append_push_back TRACERS none pmemcheck memcheck)
+
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/iterator.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/T_size_size.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/string_size_size.pass
@@ -498,7 +501,10 @@ if (ENABLE_STRING)
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/size_char.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/string_view.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/string.pass
-	# XXX: port libcxx test basic_string/string.modifiers/string_append/initializer_list.pass
+
+	build_test(string_libcxx_modifiers_append_initializer_list libcxx/basic_string/string.modifiers/string_append/initializer_list.pass.cpp)
+	add_test_generic(NAME string_libcxx_modifiers_append_initializer_list TRACERS none pmemcheck memcheck)
+
 	# XXX: port libcxx test basic_string/string.modifiers/string_append/pointer.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_insert/iter_char.pass
 	# XXX: port libcxx test basic_string/string.modifiers/string_insert/iter_initializer_list.pass
@@ -559,9 +565,8 @@ if (ENABLE_STRING)
 	# XXX: port libcxx test basic_string/string.iterators/db_iterators_6.pass
 	# XXX: port libcxx test basic_string/string.require/contiguous.pass
 
-	# XXX: push_back() required
-	# build_test(string_libcxx_capacity libcxx/basic_string/string.capacity/capacity.pass.cpp)
-	# add_test_generic(NAME string_libcxx_capacity TRACERS none pmemcheck memcheck)
+	 build_test(string_libcxx_capacity libcxx/basic_string/string.capacity/capacity.pass.cpp)
+	 add_test_generic(NAME string_libcxx_capacity TRACERS none pmemcheck memcheck)
 
 	build_test(string_libcxx_clear libcxx/basic_string/string.capacity/clear.pass.cpp)
 	add_test_generic(NAME string_libcxx_clear TRACERS none pmemcheck memcheck)
