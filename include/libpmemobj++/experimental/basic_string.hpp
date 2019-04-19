@@ -231,9 +231,10 @@ private:
 		non_sso_type data_large;
 	};
 
-	/* Holds info whether sso used or not,
-	 * std::numeric_limits<size_type>::max() otherwise */
-	p<char> use_sso;
+	/* Holds size for sso string, LSB indicates if sso is used */
+	p<unsigned char> _size;
+
+	const unsigned char _sso_mask = 0x01;
 
 	/* helper functions */
 	bool is_sso_used() const;
@@ -269,6 +270,12 @@ private:
 	void check_tx_stage_work() const;
 	void check_pmem_tx() const;
 	void snapshot_sso() const;
+	size_type get_sso_size() const;
+	void enable_sso();
+	void disable_sso();
+	void set_size(size_type new_size);
+	void sso_to_large(size_t new_capacity);
+  	void large_to_sso();
 };
 
 /**
@@ -285,7 +292,7 @@ basic_string<CharT, Traits>::basic_string()
 {
 	check_pmem_tx();
 
-	use_sso = 1;
+	allocate(0);
 	initialize(0U, value_type('\0'));
 }
 
@@ -529,8 +536,10 @@ basic_string<CharT, Traits>::basic_string(basic_string &&other)
 	allocate(other.size());
 	initialize(std::move(other));
 
-	if (other.is_sso_used())
-		other.initialize(0U, value_type('\0'));
+	if (other.is_sso_used()) {
+	  	other.set_size(0);
+		other.assign_sso_data(0U, value_type('\0'));
+	}
 }
 
 /**
@@ -872,8 +881,10 @@ basic_string<CharT, Traits>::assign(basic_string &&other)
 	transaction::run(pop, [&] {
 		replace(std::move(other));
 
-		if (other.is_sso_used())
-			other.initialize(0U, value_type('\0'));
+		if (other.is_sso_used()) {
+		  other.set_size(0);
+		  other.assign_sso_data(0U, value_type('\0'));
+		}
 	});
 
 	return *this;
@@ -1239,7 +1250,7 @@ typename basic_string<CharT, Traits>::size_type
 basic_string<CharT, Traits>::size() const noexcept
 {
 	if (is_sso_used())
-		return traits_type::length(&*data_sso.begin());
+		return get_sso_size();
 	else if (data_large.size() == 0)
 		return 0;
 	else
@@ -1275,15 +1286,7 @@ basic_string<CharT, Traits>::append(size_type count, CharT ch)
 	transaction::run(pop, [&] {
 		if (is_sso_used()) {
 			if (new_size > sso_capacity) {
-				sso_type tmp;
-				std::copy(cbegin(), cend(), &*tmp.begin());
-				auto sz = size();
-				tmp[sz] = '\0';
-
-				destroy_data();
-				allocate(new_size);
-				initialize(tmp.cbegin(), tmp.cbegin() + sz);
-
+				sso_to_large(new_size);
 				data_large.resize(new_size, ch);
 				data_large.push_back(value_type('\0'));
 			} else {
@@ -1293,10 +1296,11 @@ basic_string<CharT, Traits>::append(size_type count, CharT ch)
 						.begin();
 				traits_type::assign(dest, count, ch);
 
+				set_size(new_size);
 				data_sso[new_size] = '\0';
 			}
 		} else {
-			data_large.resize(count, ch);
+			data_large.resize(new_size, ch);
 			data_large.push_back(value_type('\0'));
 		}
 	});
@@ -1343,15 +1347,7 @@ basic_string<CharT, Traits>::append(const CharT *s, size_type count)
 	transaction::run(pop, [&] {
 		if (is_sso_used()) {
 			if (new_size > sso_capacity) {
-				sso_type tmp;
-				std::copy(cbegin(), cend(), &*tmp.begin());
-				auto sz = size();
-				tmp[sz] = '\0';
-
-				destroy_data();
-				allocate(new_size);
-				initialize(tmp.cbegin(), tmp.cbegin() + sz);
-
+				sso_to_large(new_size);
 				data_large.insert(
 					data_large.begin() +
 						static_cast<ptrdiff_t>(sz),
@@ -1365,6 +1361,7 @@ basic_string<CharT, Traits>::append(const CharT *s, size_type count)
 						.begin();
 				traits_type::copy(dest, s, count);
 
+				set_size(new_size);
 				data_sso[new_size] = '\0';
 			}
 		} else {
@@ -1715,9 +1712,10 @@ basic_string<CharT, Traits>::resize(size_type count, CharT ch)
 		if (count > sz) {
 			append(count - sz, ch);
 		} else if (is_sso_used()) {
+			set_size(count);
 			data_sso[count] = '\0';
 		} else {
-			data_large.resize(count);
+			data_large.resize(count, ch);
 			data_large.push_back(value_type('\0'));
 		}
 	});
@@ -1747,25 +1745,26 @@ basic_string<CharT, Traits>::reserve(size_type new_cap)
 		return;
 
 	if (is_sso_used()) {
-		auto sz = size();
-
-		sso_type tmp;
-		std::copy(cbegin(), cend(), &*tmp.begin());
-		tmp[sz] = '\0';
-
-		auto begin = tmp.cbegin();
-		auto end = begin + sz;
-
-		auto pop = get_pool();
-
-		transaction::run(pop, [&] {
-			destroy_data();
-
-			detail::create<decltype(data_large)>(&data_large);
-			data_large.reserve(new_cap + sizeof('\0'));
-			data_large.assign(begin, end);
-			data_large[sz] = value_type('\0');
-		});
+	  sso_to_large(new_cap);
+//		auto sz = size();
+//
+//		sso_type tmp;
+//		std::copy(cbegin(), cend(), &*tmp.begin());
+//		tmp[sz] = '\0';
+//
+//		auto begin = tmp.cbegin();
+//		auto end = begin + sz;
+//
+//		auto pop = get_pool();
+//
+//		transaction::run(pop, [&] {
+//			destroy_data();
+//
+//			detail::create<decltype(data_large)>(&data_large);
+//			data_large.reserve(new_cap + sizeof('\0'));
+//			data_large.assign(begin, end);
+//			data_large[sz] = value_type('\0');
+//		});
 	} else {
 		data_large.reserve(new_cap + sizeof('\0'));
 	}
@@ -1782,19 +1781,7 @@ basic_string<CharT, Traits>::shrink_to_fit()
 		return;
 
 	if (size() <= sso_capacity) {
-		sso_type tmp;
-		std::copy(cbegin(), cbegin() + size(), &*tmp.begin());
-		tmp[size()] = '\0';
-
-		auto begin = tmp.cbegin();
-		auto end = begin + size();
-
-		auto pop = get_pool();
-
-		transaction::run(pop, [&] {
-			destroy_data();
-			initialize(begin, end);
-		});
+	  	large_to_sso();
 	} else {
 		data_large.shrink_to_fit();
 	}
@@ -1809,6 +1796,16 @@ basic_string<CharT, Traits>::clear()
 {
 	erase(cbegin(), cend());
 };
+
+/**
+ * XXX:
+ */
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::push_back(CharT ch)
+{
+	append(static_cast<size_type>(1), ch);
+}
 
 /**
  * XXX:
@@ -1837,6 +1834,7 @@ basic_string<CharT, Traits>::erase(size_type index, size_type count)
 			traits_type::move(dest, &*last, len);
 
 			auto new_size = sz - len;
+			set_size(new_size);
 			data_sso[new_size] = value_type('\0');
 		} else {
 			data_large.erase(first, last);
@@ -1845,16 +1843,6 @@ basic_string<CharT, Traits>::erase(size_type index, size_type count)
 
 	return *this;
 };
-
-/**
- * XXX:
- */
-template <typename CharT, typename Traits>
-void
-basic_string<CharT, Traits>::push_back(CharT ch)
-{
-	append(static_cast<size_type>(1), ch);
-}
 
 /**
  * XXX:
@@ -1893,7 +1881,7 @@ template <typename CharT, typename Traits>
 bool
 basic_string<CharT, Traits>::is_sso_used() const
 {
-	return use_sso;
+	return _size & _sso_mask;
 }
 
 template <typename CharT, typename Traits>
@@ -1911,12 +1899,86 @@ basic_string<CharT, Traits>::snapshot_sso() const
 
 template <typename CharT, typename Traits>
 void
+basic_string<CharT, Traits>::set_size(size_type new_size)
+{
+	if (new_size <= sso_capacity)
+		_size = new_size << 1 | _sso_mask;
+	else
+		/* LSB must be cleared */
+		_size = std::numeric_limits<unsigned char>::max() - 1;
+}
+
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::sso_to_large(size_t new_capacity)
+{
+	auto sz = size();
+
+	sso_type tmp;
+	if (sz) {
+		std::copy(cbegin(), cend(), &*tmp.begin());
+		tmp[sz] = '\0';
+	}
+
+	destroy_data();
+	allocate(new_capacity);
+
+	if (sz) {
+		initialize(tmp.cbegin(), tmp.cbegin() + sz);
+	} else {
+		data_large.data();
+	}
+};
+
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::large_to_sso()
+{
+  sso_type tmp;
+  std::copy(cbegin(), cbegin() + size(), &*tmp.begin());
+  tmp[size()] = '\0';
+
+  auto begin = tmp.cbegin();
+  auto end = begin + size();
+
+  auto pop = get_pool();
+
+  transaction::run(pop, [&] {
+	destroy_data();
+	initialize(begin, end);
+  });
+};
+
+template <typename CharT, typename Traits>
+typename basic_string<CharT, Traits>::size_type
+basic_string<CharT, Traits>::get_sso_size() const
+{
+	return _size >> 1;
+}
+
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::enable_sso()
+{
+	_size |= _sso_mask;
+}
+
+template <typename CharT, typename Traits>
+void
+basic_string<CharT, Traits>::disable_sso()
+{
+	_size &= ~_sso_mask;
+}
+
+template <typename CharT, typename Traits>
+void
 basic_string<CharT, Traits>::destroy_data()
 {
 	assert(pmemobj_tx_stage() == TX_STAGE_WORK);
 
 	if (is_sso_used()) {
 		snapshot_sso();
+		disable_sso();
 		/* data_sso constructor does not have to be called */
 	} else {
 		data_large.free_data();
@@ -2021,13 +2083,16 @@ basic_string<CharT, Traits>::allocate(size_type capacity)
 {
 	assert(pmemobj_tx_stage() == TX_STAGE_WORK);
 
-	use_sso = capacity > sso_capacity ? 0 : 1;
+	if (capacity <= sso_capacity) {
+		enable_sso();
+	}
+	set_size(capacity);
 
 	/*
 	 * array is aggregate type so it's not required to call
 	 * a constructor.
 	 */
-	if (!use_sso) {
+	if (!is_sso_used()) {
 		detail::conditional_add_to_tx(&data_large);
 		detail::create<decltype(data_large)>(&data_large);
 		data_large.reserve(capacity + sizeof('\0'));
